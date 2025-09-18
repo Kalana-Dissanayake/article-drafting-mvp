@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 import { 
   Edit3, 
   Trash2, 
@@ -34,19 +35,9 @@ export const KeyPointsEditor = ({ projectData, onUpdate, onNext }: KeyPointsEdit
   
   const [newPointText, setNewPointText] = useState("");
   const [isExtracting, setIsExtracting] = useState(false);
-  const [apiKey, setApiKey] = useState("");
   const { toast } = useToast();
 
   const handleExtractPoints = async () => {
-    if (!apiKey.trim()) {
-      toast({
-        title: "API Key Required",
-        description: "Please enter your Perplexity API key to extract key points",
-        variant: "destructive"
-      });
-      return;
-    }
-
     if (!projectData.transcript && projectData.sources.length === 0) {
       toast({
         title: "No Content Available",
@@ -59,99 +50,26 @@ export const KeyPointsEditor = ({ projectData, onUpdate, onNext }: KeyPointsEdit
     setIsExtracting(true);
     
     try {
-      // Prepare content for extraction
-      const transcriptText = projectData.transcript || "No transcript provided";
-      const sourceText = projectData.sources
-        .filter(s => s.content && s.status === "ready")
-        .map(s => `[${s.name}]: ${s.content}`)
-        .join("\n\n") || "No supporting sources provided";
-
-      // Create the extraction prompt
-      const prompt = `You are an editorial assistant helping a human editor.
-
-TASK: Extract the most important key points from the provided interview transcript and supporting sources.
-
-Transcript:
-${transcriptText}
-
-Supporting Source(s):
-${sourceText}
-
-INSTRUCTIONS:
-1. Read the transcript and supporting sources carefully.
-2. Identify 5–10 key points that are factual, distinct, and relevant to the story.
-3. Write each key point as a clear, short sentence.
-4. If a point is supported by a source, note the source in brackets. Example: [Transcript], [Source PDF], [Web article].
-5. Do not invent new information. Only use what is present in the transcript and sources.
-6. Output the key points as a numbered list.`;
-
-      const response = await fetch('https://api.perplexity.ai/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'llama-3.1-sonar-small-128k-online',
-          messages: [
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          temperature: 0.2,
-          top_p: 0.9,
-          max_tokens: 1000,
-          frequency_penalty: 1,
-          presence_penalty: 0
-        }),
+      const { data, error } = await supabase.functions.invoke('extract-key-points', {
+        body: {
+          transcript: projectData.transcript,
+          sources: projectData.sources
+        }
       });
 
-      if (!response.ok) {
-        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      if (error) {
+        throw new Error(error.message || 'Failed to extract key points');
       }
 
-      const data = await response.json();
-      const content = data.choices[0]?.message?.content || "";
-      
-      // Parse the numbered list response
-      const keyPointsText = content.split('\n')
-        .filter(line => /^\d+\./.test(line.trim()))
-        .map(line => line.replace(/^\d+\.\s*/, '').trim());
-
-      // Convert to key point objects
-      const newKeyPoints = keyPointsText.map((text, index) => {
-        // Extract source references
-        const sourceMatch = text.match(/\[([^\]]+)\]/);
-        const sourceId = sourceMatch ? sourceMatch[1].toLowerCase() : "transcript";
-        
-        // Categorize based on content
-        let category = "general";
-        if (text.toLowerCase().includes("bias") || text.toLowerCase().includes("discrimination")) {
-          category = "bias";
-        } else if (text.toLowerCase().includes("example") || text.toLowerCase().includes("case")) {
-          category = "examples";
-        } else if (text.toLowerCase().includes("regulation") || text.toLowerCase().includes("law") || text.toLowerCase().includes("policy")) {
-          category = "regulation";
-        } else if (text.toLowerCase().includes("recommend") || text.toLowerCase().includes("should")) {
-          category = "recommendations";
-        }
-
-        return {
-          id: `extracted-${Date.now()}-${index}`,
-          text: text.replace(/\[[^\]]+\]/g, '').trim(), // Remove source brackets from text
-          sourceId,
-          category,
-          approved: false,
-          confidence: 0.85 + (Math.random() * 0.15) // Random confidence between 0.85-1.0
-        };
-      });
-
-      setExtractedPoints(newKeyPoints);
-      toast({
-        title: "Key Points Extracted",
-        description: `Found ${newKeyPoints.length} key insights from your sources`,
-      });
+      if (data?.keyPoints) {
+        setExtractedPoints(data.keyPoints);
+        toast({
+          title: "Key Points Extracted",
+          description: `Found ${data.keyPoints.length} key insights from your sources`,
+        });
+      } else {
+        throw new Error('No key points returned from the API');
+      }
     } catch (error) {
       console.error("Extraction error:", error);
       toast({
@@ -242,27 +160,6 @@ INSTRUCTIONS:
         </CardHeader>
         
         <CardContent className="space-y-6">
-          {/* API Key Input */}
-          <div className="bg-muted/30 rounded-lg p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="font-medium text-sm">Perplexity API Configuration</h4>
-              <Badge variant="outline" className="text-xs">Required for AI extraction</Badge>
-            </div>
-            <Input
-              type="password"
-              placeholder="Enter your Perplexity API key..."
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              className="font-mono text-sm"
-            />
-            <p className="text-xs text-muted-foreground">
-              Your API key is only used locally and never stored. Get one at{" "}
-              <a href="https://www.perplexity.ai/settings/api" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                perplexity.ai/settings/api
-              </a>
-            </p>
-          </div>
-
           {/* Extraction Controls */}
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
@@ -273,7 +170,7 @@ INSTRUCTIONS:
                 className="gap-2"
               >
                 <Eye className="w-4 h-4" />
-                {isExtracting ? "Extracting..." : "Re-extract Points"}
+                {isExtracting ? "Extracting..." : "Extract Key Points"}
               </Button>
               
               <Badge variant="secondary" className="text-sm">

@@ -1,1 +1,10 @@
 project_id = "oiqynvumcpcrsfmfvufq"
+
+# A string used to distinguish different Supabase projects on the same machine.
+# Not used by the Supabase Platform.
+# Commented out by default when the project is set up.
+# name = "my-project"
+
+# A key-value mapping used to configure Supabase Functions.
+[functions.extract-key-points]
+verify_jwt = false
