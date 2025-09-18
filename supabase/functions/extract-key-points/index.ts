@@ -2,7 +2,7 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 
 // OpenAI API key from environment
-const openAIApiKey = Deno.env.get('OPENAI_API_KEY');
+supabase secrets set OPENAI_API_KEY="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"
 
 // CORS headers
 const corsHeaders = {
