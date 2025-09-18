@@ -1,74 +1,101 @@
-import { serve } from "https://deno.land/x/sift/mod.ts";
-import OpenAI from "openai";
+// Use compatible Deno std version for Supabase Edge Functions
+import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 
-// Initialize OpenAI with API key from environment variables
-const openai = new OpenAI({
-  apiKey: Deno.env.get("OPENAI_API_KEY")
-});
+// OpenAI API key from environment
+const openAIApiKey = Deno.env.get('OPENAI_API_KEY');
+
+// CORS headers
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
+};
 
 serve(async (req) => {
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
   try {
     const { transcript, sources } = await req.json();
 
-    if (!transcript && (!sources || sources.length === 0)) {
-      return new Response(JSON.stringify({ error: "No content provided" }), { status: 400 });
+    if (!openAIApiKey) {
+      console.error('OpenAI API key not found');
+      return new Response(JSON.stringify({ error: 'OpenAI API key not configured' }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
-    // Prepare source text
-    const sourceText = (sources || [])
-      .filter(s => s.content && s.status === "ready")
-      .map(s => `[${s.name}]: ${s.content}`)
-      .join("\n\n") || "No supporting sources provided";
+    const transcriptText = transcript || "No transcript provided";
+    const sourceText = sources?.filter(s => s.content && s.status === "ready")
+      ?.map(s => `[${s.name}]: ${s.content}`)
+      ?.join("\n\n") || "No supporting sources provided";
 
-    // Create prompt
     const prompt = `You are an editorial assistant helping a human editor.
 
-TASK: Extract the most important key points from the provided transcript and supporting sources.
+TASK: Extract the most important key points from the provided interview transcript and supporting sources.
 
 Transcript:
-${transcript || "No transcript provided"}
+${transcriptText}
 
 Supporting Source(s):
 ${sourceText}
 
 INSTRUCTIONS:
-1. Read carefully and extract 5–10 key points.
-2. Write each point as a numbered list.
-3. Include the source in brackets if applicable.
-4. Do not invent information.`;
+1. Read the transcript and supporting sources carefully.
+2. Identify 5–10 key points that are factual, distinct, and relevant to the story.
+3. Write each key point as a clear, short sentence.
+4. If a point is supported by a source, note the source in brackets. Example: [Transcript], [Source PDF], [Web article].
+5. Do not invent new information. Only use what is present in the transcript and sources.
+6. Output the key points as a numbered list.`;
 
-    // Call OpenAI API
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.2,
-      max_tokens: 1000
+    console.log('Making request to OpenAI API');
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openAIApiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 1000,
+        temperature: 0.2
+      })
     });
 
-    const rawText = completion.choices[0]?.message?.content || "";
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`OpenAI API Error: ${response.status} ${response.statusText}`, errorText);
+      throw new Error(`API Error: ${response.status} ${response.statusText}`);
+    }
 
-    // Parse numbered list into objects
-    const keyPointsText = rawText
-      .split("\n")
+    const data = await response.json();
+    const content = data.choices[0]?.message?.content || "";
+    console.log('Received response from OpenAI:', content);
+
+    // Parse numbered list
+    const keyPointsText = content.split('\n')
       .filter(line => /^\d+\./.test(line.trim()))
-      .map(line => line.replace(/^\d+\.\s*/, "").trim());
+      .map(line => line.replace(/^\d+\.\s*/, '').trim());
 
+    // Convert to key point objects
     const keyPoints = keyPointsText.map((text, index) => {
-      // Extract source if present in brackets
       const sourceMatch = text.match(/\[([^\]]+)\]/);
       const sourceId = sourceMatch ? sourceMatch[1].toLowerCase() : "transcript";
 
-      // Categorize automatically
       let category = "general";
-      const lowerText = text.toLowerCase();
-      if (lowerText.includes("bias") || lowerText.includes("discrimination")) category = "bias";
-      else if (lowerText.includes("example") || lowerText.includes("case")) category = "examples";
-      else if (lowerText.includes("regulation") || lowerText.includes("law") || lowerText.includes("policy")) category = "regulation";
-      else if (lowerText.includes("recommend") || lowerText.includes("should")) category = "recommendations";
+      const textLower = text.toLowerCase();
+      if (textLower.includes("bias") || textLower.includes("discrimination")) category = "bias";
+      else if (textLower.includes("example") || textLower.includes("case")) category = "examples";
+      else if (textLower.includes("regulation") || textLower.includes("law") || textLower.includes("policy")) category = "regulation";
+      else if (textLower.includes("recommend") || textLower.includes("should")) category = "recommendations";
 
       return {
         id: `extracted-${Date.now()}-${index}`,
-        text: text.replace(/\[[^\]]+\]/g, "").trim(),
+        text: text.replace(/\[[^\]]+\]/g, '').trim(),
         sourceId,
         category,
         approved: false,
@@ -76,16 +103,17 @@ INSTRUCTIONS:
       };
     });
 
+    console.log(`Successfully extracted ${keyPoints.length} key points`);
+
     return new Response(JSON.stringify({ keyPoints }), {
-      headers: { "Content-Type": "application/json" },
-      status: 200
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
 
   } catch (error) {
-    console.error("Error in extract-key-points function:", error);
-    return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), {
+    console.error('Error in extract-key-points function:', error);
+    return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
-      headers: { "Content-Type": "application/json" }
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
 });
