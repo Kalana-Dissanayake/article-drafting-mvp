@@ -67,6 +67,32 @@ The rest of the flow (project creation, transcript/source upload, editor control
 - ❌ Key point extraction (not working — depends on API)
 - ❌ Quote checker (not working — depends on API)
 
+## Trade-offs Made:
+
+- API integration simulated due to time constraints.
+
+- Key point extraction and quote checker not functional without live API calls.
+
+- Focused on UX clarity and clean editor flow.
+
+## Next Steps:
+
+- Finalize OpenAI + Supabase integration for live AI features.
+
+- Implement deduplication logic for key points.
+
+- Activate quote checker with real source matching.
+
+- Add versioning/checkpoint system.
+
+- Optimize performance for long transcripts (≥10k chars).
+
+- Add light test coverage for quote matching.
+
+## Sample Inputs:
+
+**Building the Future Sundar Pichai on A.I., Regulation and What’s Next for Google https** : //www.youtube.com/watch?v=OsxwBmp3iFU&t=3s
+**OpenAI’s Sam Altman Talks ChatGPT, AI Agents and Superintelligence — Live at TED2025** : https://www.youtube.com/watch?v=5MWT_doo68k&t=56s
 
 ## What technologies are used for this project?
 
