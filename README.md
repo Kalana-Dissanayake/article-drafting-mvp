@@ -1,3 +1,5 @@
+https://github.com/user-attachments/assets/4dc0cd9b-c562-4f5f-9f6f-0c44d4c62534
+
 ## Article Drafting Assistant (MVP)
 
 An AI-assisted low-code application built with Lovable.dev for the 24-Hour Low-Code Challenge.
